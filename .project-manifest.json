@@ -368,6 +368,29 @@
       "success": "query execution facts and database resource state produces a verified domain result",
       "failure": "candidates vs scanned vs returned have distinct meanings",
       "verification": "python3 examples/walkthrough.py --workflow statistics"
+    },
+    {
+      "id": "write-admission",
+      "name": "capacity ledger and shrinkable write-set admission",
+      "entry": "POST /transactions/{tx}/put then /commit",
+      "steps": [
+        "transport",
+        "engine",
+        "versions",
+        "journal",
+        "index"
+      ],
+      "module_ids": [
+        "transport",
+        "engine",
+        "versions",
+        "journal",
+        "index",
+        "catalog"
+      ],
+      "success": "instance and transaction byte budgets admit, refuse and release retained state while preserving accepted edits",
+      "failure": "a refusal must not consume a sequence, close the session or lose staged edits; vacuum reports bytes only for real removal",
+      "verification": "python3 examples/walkthrough.py --workflow write-admission"
     }
   ],
   "complexity": {

@@ -15,6 +15,7 @@ type Stats struct {
 	Commits        uint64         `json:"commits_since_open"`
 	Conflicts      uint64         `json:"conflicts_since_open"`
 	Queries        uint64         `json:"queries_since_open"`
+	Memory         Memory         `json:"memory"`
 }
 
 func (d *DB) Stats() (Stats, error) {
@@ -24,11 +25,9 @@ func (d *DB) Stats() (Stats, error) {
 		return Stats{}, err
 	}
 	keys, versions := d.store.Count()
-	s := Stats{Sequence: d.sequence, Horizon: d.horizon, Keys: keys, Versions: versions, Active: []Transaction{}, IndexEntries: map[string]int{}, JournalRecords: len(d.wal.Records), HistoryBase: d.wal.Base, RecoveredTail: d.wal.RecoveredTail, Commits: d.commits, Conflicts: d.conflicts, Queries: d.queries}
+	s := Stats{Sequence: d.sequence, Horizon: d.horizon, Keys: keys, Versions: versions, Active: []Transaction{}, IndexEntries: map[string]int{}, JournalRecords: len(d.wal.Records), HistoryBase: d.wal.Base, RecoveredTail: d.wal.RecoveredTail, Commits: d.commits, Conflicts: d.conflicts, Queries: d.queries, Memory: d.memory()}
 	for _, tx := range d.transactions {
-		copy := *tx
-		copy.writes = nil
-		s.Active = append(s.Active, copy)
+		s.Active = append(s.Active, d.view(tx))
 	}
 	sort.Slice(s.Active, func(i, j int) bool { return s.Active[i].ID < s.Active[j].ID })
 	for name, t := range d.indexes.Trees {

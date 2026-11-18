@@ -2,6 +2,16 @@ package versions
 
 import "lamina/internal/datum"
 
+// The admission ledger deliberately uses a deterministic estimate rather than
+// runtime heap measurements. The constants cover the map slots, slice entries
+// and retained strings that a staged mutation or a committed version keeps
+// alive. They are accounting units, not a promise about Go allocator rounding.
+const (
+	mutationOverhead int64 = 96
+	rowOverhead      int64 = 48
+	columnOverhead   int64 = 24
+)
+
 type Mutation struct {
 	Relation string    `json:"relation"`
 	Key      string    `json:"key"`
@@ -86,4 +96,45 @@ func (s *Store) Count() (keys, versions int) {
 		}
 	}
 	return
+}
+
+// EstimateMutation returns the accounting charge for one privately staged or
+// durably committed mutation. Replacement of the same key is charged once per
+// final write because only the last staged value is retained.
+func EstimateMutation(m Mutation) int64 {
+	size := mutationOverhead + int64(len(m.Relation)) + int64(len(m.Key))
+	if m.Deleted {
+		return size
+	}
+	return size + EstimateRow(m.Row)
+}
+
+// EstimateRow returns the accounting charge for one materialized row.
+func EstimateRow(row datum.Row) int64 {
+	size := rowOverhead
+	for k, v := range row {
+		size += columnOverhead + int64(len(k))
+		switch v.Kind {
+		case "text":
+			size += int64(len(v.Text))
+		case "int", "bool":
+			size += 8
+		}
+	}
+	return size
+}
+
+// EstimateVersions totals the charge for all versions currently retained in the
+// store. It is used for diagnostics and restart reconciliation, never as a
+// substitute for the live ledger maintained by the engine.
+func (s *Store) EstimateVersions() int64 {
+	var total int64
+	for relation, rows := range s.Tables {
+		for key, chain := range rows {
+			for _, v := range chain {
+				total += EstimateMutation(Mutation{Relation: relation, Key: key, Row: v.Row, Deleted: v.Deleted})
+			}
+		}
+	}
+	return total
 }

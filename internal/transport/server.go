@@ -55,8 +55,10 @@ func respondError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	code := "internal"
 	var domain *engine.Error
+	var details map[string]any
 	if errors.As(err, &domain) {
 		code = domain.Code
+		details = domain.Details
 		switch code {
 		case "invalid":
 			status = 400
@@ -77,7 +79,11 @@ func respondError(w http.ResponseWriter, err error) {
 		slog.Error("request failed", "error", err)
 		message = "internal database error"
 	}
-	write(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	body := map[string]any{"error": map[string]any{"code": code, "message": message}}
+	if details != nil {
+		body["error"].(map[string]any)["details"] = details
+	}
+	write(w, status, body)
 }
 func (s *Server) routes() {
 	const p = "/v1/lamina"

@@ -66,10 +66,35 @@ func (d *DB) CreateIndex(i catalog.Index) (catalog.Index, error) {
 			return i, err
 		}
 	}
+	// Index candidates are retained instance state, so building an index must
+	// fit the same budget as writes. Measure the exact candidate charge on a
+	// throwaway tree before the durable catalog append; a build that cannot fit
+	// leaves no catalog entry and no sequence, matching unique-build failure.
+	probe := index.New()
+	for key, chain := range d.store.Tables[i.Relation] {
+		for _, v := range chain {
+			if !v.Deleted {
+				probe.Add(v.Row[i.Column], key)
+			}
+		}
+	}
+	if d.instanceUsed()+probe.Bytes() > d.limits.InstanceBytes {
+		d.capacityRejects++
+		return i, faultDetails("capacity", "index build would exceed the instance memory budget", map[string]any{
+			"scope":             "index_build",
+			"index_bytes":       probe.Bytes(),
+			"instance_bytes":    d.instanceUsed(),
+			"instance_limit":    d.limits.InstanceBytes,
+			"available_bytes":   max64(d.limits.InstanceBytes-d.instanceUsed(), 0),
+			"catalog_preserved": true,
+			"hint":              "vacuum reclaims historical candidates; an active reader keeps them retained until it closes",
+		})
+	}
 	i.Created = d.sequence + 1
 	if err := d.publish(journal.Record{Kind: "index", Index: &i}); err != nil {
 		return i, err
 	}
 	d.indexes = index.Build(d.catalog, d.store)
+	d.indexBytes = d.indexes.Bytes()
 	return i, nil
 }

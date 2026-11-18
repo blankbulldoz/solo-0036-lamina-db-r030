@@ -25,7 +25,12 @@ func run() error {
 	dir := flag.String("data", "var/lamina", "data directory exclusively owned by this process")
 	addr := flag.String("listen", "127.0.0.1:7386", "HTTP bind address")
 	restore := flag.String("restore", "", "validated backup to install into a new data directory before serving")
+	instanceBytes := flag.Int64("max-instance-bytes", engine.DefaultInstanceBytes, "admission budget for retained versions, index candidates and staged write sets")
+	transactionBytes := flag.Int64("max-transaction-bytes", engine.DefaultTransactionBytes, "per-transaction final write set budget")
 	flag.Parse()
+	if *instanceBytes <= 0 || *transactionBytes <= 0 {
+		return fmt.Errorf("capacity limits must be positive")
+	}
 	if *restore != "" {
 		info, err := os.Stat(*restore)
 		if err != nil {
@@ -42,7 +47,7 @@ func run() error {
 			return err
 		}
 	}
-	db, err := engine.Open(*dir)
+	db, err := engine.OpenWithLimits(*dir, engine.Limits{InstanceBytes: *instanceBytes, TransactionBytes: *transactionBytes})
 	if err != nil {
 		return err
 	}

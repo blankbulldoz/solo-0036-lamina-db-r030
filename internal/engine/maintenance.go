@@ -87,10 +87,53 @@ func (d *DB) Vacuum(requested uint64) (versions.VacuumResult, error) {
 	}
 	beforeKeys, beforeVersions := d.store.Count()
 	_ = beforeKeys
-	if err := d.publish(journal.Record{Kind: "vacuum", Horizon: horizon}); err != nil {
-		return versions.VacuumResult{}, err
+	indexBefore := d.indexBytes
+	reclaimed := int64(0)
+	switch {
+	case horizon > d.horizon:
+		if err := d.publish(journal.Record{Kind: "vacuum", Horizon: horizon}); err != nil {
+			return versions.VacuumResult{}, err
+		}
+		reclaimed = d.vacuumReclaimed
+	case horizon == d.horizon:
+		// The same horizon is already durable. Applying the retention rule at
+		// the same horizon removes nothing new, so there is no record to append
+		// and no reclaimed bytes to report. Reporting zero keeps a request that
+		// "succeeded" from looking like returned capacity.
+		reclaimed = 0
+	default:
+		// horizon < d.horizon cannot happen: requested >= d.horizon and every
+		// contribution to horizon is a transaction snapshot, which never moves
+		// backwards.
+		reclaimed = 0
 	}
 	_, remaining := d.store.Count()
 	d.indexes = index.Build(d.catalog, d.store)
-	return versions.VacuumResult{Horizon: horizon, Removed: beforeVersions - remaining, Retained: remaining, Pinned: horizon < requested}, nil
+	d.versionBytes -= reclaimed
+	if d.versionBytes < 0 {
+		d.versionBytes = 0
+	}
+	d.indexBytes = d.indexes.Bytes()
+	indexAfter := d.indexBytes
+	indexReclaimed := indexBefore - indexAfter
+	if indexReclaimed < 0 {
+		indexReclaimed = 0
+	}
+	oldest, readers, hasOldest := d.oldestSnapshot()
+	pinnedBy := map[string]any{}
+	if hasOldest {
+		pinnedBy["oldest_snapshot"] = oldest
+		pinnedBy["transactions_at_oldest"] = readers
+	}
+	return versions.VacuumResult{
+		Horizon:             horizon,
+		Removed:             beforeVersions - remaining,
+		Retained:            remaining,
+		Pinned:              horizon < requested,
+		ReclaimedBytes:      reclaimed,
+		IndexReclaimedBytes: indexReclaimed,
+		InstanceBytes:       d.instanceUsed(),
+		IndexBytes:          d.indexBytes,
+		PinnedBy:            pinnedBy,
+	}, nil
 }

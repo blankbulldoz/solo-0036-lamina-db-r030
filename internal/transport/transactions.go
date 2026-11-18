@@ -28,11 +28,12 @@ func (s *Server) put(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.db.Put(r.PathValue("tx"), in.Relation, in.Row, in.InsertOnly); err != nil {
+	tx, err := s.db.Put(r.PathValue("tx"), in.Relation, in.Row, in.InsertOnly)
+	if err != nil {
 		respondError(w, err)
 		return
 	}
-	write(w, 200, map[string]string{"state": "staged"})
+	write(w, 200, map[string]any{"state": "staged", "transaction": tx, "memory": s.db.Memory()})
 }
 func (s *Server) deleteRow(w http.ResponseWriter, r *http.Request) {
 	var in struct {
@@ -42,11 +43,12 @@ func (s *Server) deleteRow(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	if err := s.db.Delete(r.PathValue("tx"), in.Relation, in.Key); err != nil {
+	tx, err := s.db.Delete(r.PathValue("tx"), in.Relation, in.Key)
+	if err != nil {
 		respondError(w, err)
 		return
 	}
-	write(w, 200, map[string]string{"state": "staged"})
+	write(w, 200, map[string]any{"state": "staged", "transaction": tx, "memory": s.db.Memory()})
 }
 func (s *Server) commit(w http.ResponseWriter, r *http.Request) {
 	out, err := s.db.Commit(r.PathValue("tx"))

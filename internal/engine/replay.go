@@ -58,7 +58,7 @@ func (d *DB) apply(r journal.Record) error {
 		if r.Horizon < d.horizon || r.Horizon > d.sequence {
 			return fmt.Errorf("invalid vacuum horizon")
 		}
-		d.store.Vacuum(r.Horizon)
+		d.vacuumReclaimed = d.store.Vacuum(r.Horizon).ReclaimedBytes
 		d.horizon = r.Horizon
 	default:
 		return fmt.Errorf("unknown record kind %s", r.Kind)

@@ -13,22 +13,32 @@ import (
 )
 
 type DB struct {
-	mu           sync.RWMutex
-	dir          string
-	catalog      *catalog.Catalog
-	store        *versions.Store
-	indexes      *index.Registry
-	wal          *journal.WAL
-	sequence     uint64
-	horizon      uint64
-	transactions map[string]*Transaction
-	closed       bool
-	commits      uint64
-	conflicts    uint64
-	queries      uint64
+	mu              sync.RWMutex
+	dir             string
+	catalog         *catalog.Catalog
+	store           *versions.Store
+	indexes         *index.Registry
+	wal             *journal.WAL
+	sequence        uint64
+	horizon         uint64
+	transactions    map[string]*Transaction
+	closed          bool
+	commits         uint64
+	conflicts       uint64
+	queries         uint64
+	limits          Limits
+	versionBytes    int64
+	indexBytes      int64
+	privateBytes    int64
+	capacityRejects uint64
+	vacuumReclaimed int64
 }
 
 func Open(dir string) (*DB, error) {
+	return OpenWithLimits(dir, DefaultLimits())
+}
+
+func OpenWithLimits(dir string, limits Limits) (*DB, error) {
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -47,7 +57,7 @@ func Open(dir string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	d := &DB{dir: absolute, catalog: catalog.New(), store: versions.New(), wal: w, transactions: map[string]*Transaction{}}
+	d := &DB{dir: absolute, catalog: catalog.New(), store: versions.New(), wal: w, transactions: map[string]*Transaction{}, limits: limits.normalized()}
 	if !missing {
 		d.catalog = image.Catalog
 		d.store = image.Store
@@ -69,6 +79,8 @@ func Open(dir string) (*DB, error) {
 		}
 	}
 	d.indexes = index.Build(d.catalog, d.store)
+	d.versionBytes = d.store.EstimateVersions()
+	d.indexBytes = d.indexes.Bytes()
 	for _, relation := range d.catalog.List() {
 		if err = d.unique(relation.Name, nil); err != nil {
 			w.Close()
@@ -93,6 +105,9 @@ func (d *DB) Close() error {
 		return nil
 	}
 	d.closed = true
+	for _, tx := range d.transactions {
+		d.privateBytes -= tx.StagedBytes
+	}
 	d.transactions = map[string]*Transaction{}
 	return d.wal.Close()
 }
@@ -108,6 +123,7 @@ func (d *DB) publish(r journal.Record) error {
 	}
 	if len(r.Writes) > 0 {
 		d.indexes.Apply(d.catalog, r.Writes)
+		d.indexBytes = d.indexes.Bytes()
 	}
 	return nil
 }
